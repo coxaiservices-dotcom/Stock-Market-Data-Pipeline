@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Market Data Pipeline</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background-color: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        
+        input, select, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .positive {
+            color: green;
+        }
+        
+        .negative {
+            color: red;
+        }
+        
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .metric-card {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .metric-label {
+            font-size: 14px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+        
+        .metric-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        #results {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Stock Market Data Pipeline</h1>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="controls">
+            <input type="text" id="symbol" placeholder="Enter symbol (e.g., AAPL)" value="AAPL">
+            <select id="days">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+            <button onclick="fetchData()">Fetch Data</button>
+            <button onclick="runPipeline()">Run Full Pipeline</button>
+        </div>
+        
+        <div id="metrics" class="metrics" style="display: none;"></div>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000';  // Flask backend URL
+        
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.className = `status ${type}`;
+            status.textContent = message;
+            status.style.display = 'block';
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 5000);
+            }
+        }
+        
+        function formatNumber(num) {
+            return new Intl.NumberFormat('en-US', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(num);
+        }
+        
+        function formatVolume(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+        
+        async function fetchData() {
+            const symbol = document.getElementById('symbol').value.toUpperCase();
+            const days = document.getElementById('days').value;
+            
+            if (!symbol) {
+                showStatus('Please enter a symbol', 'error');
+                return;
+            }
+            
+            document.getElementById('results').innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading data...</p></div>';
+            document.getElementById('metrics').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${API_URL}/stock/${symbol}?days=${days}`);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to fetch data');
+                }
+                
+                if (data.data.length === 0) {
+                    showStatus('No data found for this symbol', 'error');
+                    document.getElementById('results').innerHTML = '';
+                    return;
+                }
+                
+                showStatus(`Loaded ${data.data.length} days of data for ${symbol}`, 'success');
+                displayMetrics(data.metrics);
+                displayData(data.data);
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                document.getElementById('results').innerHTML = '';
+            }
+        }
+        
+        function displayMetrics(metrics) {
+            const metricsDiv = document.getElementById('metrics');
+            metricsDiv.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-label">Latest Price</div>
+                    <div class="metric-value">$${formatNumber(metrics.latest_price)}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Price Change</div>
+                    <div class="metric-value ${metrics.price_change >= 0 ? 'positive' : 'negative'}">
+                        ${metrics.price_change >= 0 ? '+' : ''}${formatNumber(metrics.price_change)}%
+                    </div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Average Volume</div>
+                    <div class="metric-value">${formatVolume(metrics.avg_volume)}</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">Current RSI</div>
+                    <div class="metric-value">${formatNumber(metrics.current_rsi)}</div>
+                </div>
+            `;
+            metricsDiv.style.display = 'grid';
+        }
+        
+        function displayData(data) {
+            let html = '<table><thead><tr>';
+            html += '<th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th>';
+            html += '<th>Volume</th><th>SMA 20</th><th>SMA 50</th><th>RSI</th>';
+            html += '</tr></thead><tbody>';
+            
+            data.forEach(row => {
+                const changePercent = ((row.close - row.open) / row.open * 100);
+                const changeClass = changePercent >= 0 ? 'positive' : 'negative';
+                
+                html += '<tr>';
+                html += `<td>${new Date(row.date).toLocaleDateString()}</td>`;
+                html += `<td>$${formatNumber(row.open)}</td>`;
+                html += `<td>$${formatNumber(row.high)}</td>`;
+                html += `<td>$${formatNumber(row.low)}</td>`;
+                html += `<td class="${changeClass}">$${formatNumber(row.close)}</td>`;
+                html += `<td>${formatVolume(row.volume)}</td>`;
+                html += `<td>$${formatNumber(row.sma_20)}</td>`;
+                html += `<td>$${formatNumber(row.sma_50)}</td>`;
+                html += `<td>${formatNumber(row.rsi_14)}</td>`;
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            document.getElementById('results').innerHTML = html;
+        }
+        
+        async function runPipeline() {
+            if (!confirm('This will fetch data for multiple stocks. Continue?')) {
+                return;
+            }
+            
+            document.getElementById('results').innerHTML = '<div class="loading"><div class="spinner"></div><p>Running pipeline...</p></div>';
+            showStatus('Pipeline running... This may take a minute', 'info');
+            
+            try {
+                const response = await fetch(`${API_URL}/run-pipeline`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Pipeline failed');
+                }
+                
+                showStatus(`Pipeline completed! Processed ${data.symbols_processed} symbols in ${data.duration.toFixed(1)}s`, 'success');
+                document.getElementById('results').innerHTML = `
+                    <div style="padding: 20px; text-align: center;">
+                        <h3>Pipeline Results</h3>
+                        <p>Successfully processed ${data.symbols_processed} symbols</p>
+                        <p>Errors: ${data.errors}</p>
+                        <p>Duration: ${data.duration.toFixed(1)} seconds</p>
+                        <p>Data saved to: ${data.output_file}</p>
+                    </div>
+                `;
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                document.getElementById('results').innerHTML = '';
+            }
+        }
+        
+        // Load initial data
+        window.onload = () => {
+            fetchData();
+        };
+    </script>
+</body>
+</html>
