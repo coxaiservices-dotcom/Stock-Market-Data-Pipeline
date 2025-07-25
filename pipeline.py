@@ -127,6 +127,7 @@ class StockDataPipeline:
             Series with RSI values
         """
         delta = df['Close'].diff()
+        delta = pd.to_numeric(delta, errors='coerce')
         gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
         
@@ -194,7 +195,7 @@ class StockDataPipeline:
         
         # Forward fill missing values for price data (weekends/holidays)
         price_columns = ['Open', 'High', 'Low', 'Close']
-        df[price_columns] = df[price_columns].fillna(method='ffill')
+        df[price_columns] = df[price_columns].ffill()
         
         # Ensure volume is not negative
         df['Volume'] = df['Volume'].abs()
